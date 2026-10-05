@@ -75,7 +75,7 @@ python report.py --work OUT        # -> OUT/report/report.md and CSVs, OUT/figur
 Extra ablation worth one run: `build --resample area` (the original nearest-neighbour downsizing keeps roughly
 5% of the bytes of a 1 MB file; area averaging keeps all of them but blurs byte structure).
 
-## Not yet covered (do these before submitting)
+## Not yet covered 
 
 * **Near-duplicates.** Only exact hashes are removed. Cluster with TLSH or imphash and split by cluster.
 * **Real packers.** `UPX` is wired in and activates automatically if `upx` is on PATH, but it has not been
