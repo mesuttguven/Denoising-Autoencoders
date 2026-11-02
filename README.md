@@ -41,7 +41,7 @@ python upx_counts.py --meta meta.csv --valid valid_UPX.npy --upx-version "upx 4.
 UPX is used automatically when `upx` is on the PATH (the paper used UPX 4.2.2).
 `dae_study_revision.ipynb` is the Colab notebook that runs these steps.
 
-## Result tables (`results/`)
+## Result tables (CSV files in the repository root)
 
 | File | Content | Paper |
 |---|---|---|
