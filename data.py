@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-from imaging import bytes_to_rgb, byte_entropy
+from imaging import bytes_to_rgb, bytes_to_rgb_fixed, byte_entropy
 from obfuscate import TECHNIQUES
 
 
@@ -78,9 +78,11 @@ def make_split(labels, seed):
 
 
 def _process(args):
-    i, path, size, resample, techs = args
+    i, path, size, resample, techs, mode = args
+    to_img = (lambda x: bytes_to_rgb_fixed(x, size)) if mode == "fixed" \
+        else (lambda x: bytes_to_rgb(x, size, resample))
     b = Path(path).read_bytes()
-    out = {"clean": bytes_to_rgb(b, size, resample)}
+    out = {"clean": to_img(b)}
     valid = {}
     for name in techs:
         t = TECHNIQUES[name]
@@ -92,13 +94,13 @@ def _process(args):
             continue
         if t.invertible and t.invert(ob) != b:
             raise RuntimeError(f"{name} does not round-trip on {path}")
-        out[name] = bytes_to_rgb(ob, size, resample)
+        out[name] = to_img(ob)
         valid[name] = True
     return i, out, valid, len(b), byte_entropy(b)
 
 
 def build_store(benign_dir, malware_dir, work, size=128, resample="nearest",
-                max_per_class=None, workers=2, techniques=None):
+                max_per_class=None, workers=2, techniques=None, mode="resize"):
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     if (work / "build_done.flag").exists():
@@ -114,7 +116,7 @@ def build_store(benign_dir, malware_dir, work, size=128, resample="nearest",
           for k in names}
     valid = {t: np.ones(n, bool) for t in techs}
     nbytes, ent = np.zeros(n, np.int64), np.zeros(n)
-    jobs = ((i, r["path"], size, resample, techs) for i, r in enumerate(manifest))
+    jobs = ((i, r["path"], size, resample, techs, mode) for i, r in enumerate(manifest))
     with ProcessPoolExecutor(max_workers=workers) as ex:
         for k, (i, out, v, nb, e) in enumerate(ex.map(_process, jobs, chunksize=8)):
             for name in names:
@@ -135,7 +137,7 @@ def build_store(benign_dir, malware_dir, work, size=128, resample="nearest",
             w.writerow([i, r["label"], r["sha"], r["path"], nbytes[i], f"{ent[i]:.4f}"])
     np.save(work / "labels.npy", np.array([r["label"] for r in manifest], np.int8))
     (work / "store.json").write_text(json.dumps(
-        {"size": size, "resample": resample, "n": n, "techniques": techs,
+        {"size": size, "resample": resample, "mode": mode, "n": n, "techniques": techs,
          "invertible": [t for t in techs if TECHNIQUES[t].invertible],
          "manifest_stats": stats,
          "valid_fraction": {t: float(valid[t].mean()) for t in techs}}, indent=2))

@@ -1,95 +1,63 @@
-# Do Denoising Autoencoders Improve Static Malware Detection Under Obfuscation? A Controlled Evaluation
+# Do Denoising Autoencoders Improve Image-Based Static Malware Detection Under Synthetic Byte-Level Obfuscation and UPX Packing? A Controlled Evaluation
 
-Experiment package for the rebuilt study. It replaces the original notebook's evaluation.
+Code and result tables for the paper (MDPI *Electronics*, manuscript electronics-4646019).
+The question: if a file is obfuscated, does passing its image through a denoising autoencoder (DAE) before the classifier restore detection, and does it do so better than the simple alternatives (no defence, training the classifier on obfuscated files, a blur filter)?
 
-## Question
+## Data
 
-If an attacker obfuscates a file, does passing its image through a denoising autoencoder (DAE) before
-classification restore detection, and does it do so better than the obvious alternatives
-(no defence; training the classifier on obfuscated data)?
+- The collection is TRAPMINE: 17,000 files (10,000 benign, 7,000 malware) after removing duplicates by SHA-256.
+- The raw executables are confidential and some are live malware. They are not released.
+- The clean 128x128 RGB images of the 17,000 files (3 bytes = 1 pixel) are on Zenodo: https://doi.org/10.5281/zenodo.19100300 (`benign.zip`, `malicious.zip`). The same record also holds `Cleaned_Images.zip` from an earlier study; it is not used here.
+- The obfuscated images are made from the raw bytes and are **not** released. The code applies every transformation to executable files, so the whole experiment can be repeated on any other folder of benign and malware executables.
 
-## What was wrong with the original evaluation
+## Protocol (short)
 
-| # | Finding in the original notebook | Effect |
-|---|---|---|
-| 1 | Benign test images were copied raw; only malware went through the DAE (cells 42, 44) | Specificity frozen across models; the DAE output acted as a class marker |
-| 2 | "DAE + X" re-used the classifier trained on raw images (cells 37, 48-50 load the same model folder) | Pure train/test shift, which explains the sensitivity jumps and collapses; Layers/Params columns in Table 1 are arithmetic, not measurements |
-| 3 | DAEs trained at 128x128, applied at 224x224 | Untrained scale |
-| 4 | `save_img(scale=True)` min-max stretched DAE outputs only | Per-image contrast normalisation that raw images never received |
-| 5 | Committed notebook does not reproduce Table 1 (output folder mismatch) | Results not reproducible from the repo |
-| 6 | Notebook loads TRAPMINE / ML4CS data; the manuscript names VirusTotal, MalwareBazaar, Any.Run, Softonic, SourceForge, CNET | Provenance must be reconciled before submission |
-| 7 | The coded obfuscations differ from the manuscript's descriptions (see `obfuscate.py`) | In particular **File_Header_Modification keeps 128 bytes and overwrites the rest with 0xFF**, which destroys the file and cannot be inverted |
-
-## Protocol
-
-* Obfuscation is applied to **both** classes, so every file has a known clean counterpart.
-* Whatever preprocessing a condition uses is applied to **every** test file.
-* Files are deduplicated by SHA-256 (hashes present in both classes are dropped) **before** splitting.
-  Splits are 60/20/20, stratified, drawn per seed. DAEs and classifiers are fit on the train split only.
-* Pipeline holds everything in uint8 memmaps; there is no PNG round-trip.
-
-### Conditions (per technique, per classifier)
-
-| condition | classifier trained on | test input |
-|---|---|---|
-| `clean_ref` | clean | clean |
-| `identity` | clean | obfuscated (no defence) |
-| `dae_t` | clean | DAE trained for that technique (technique known) |
-| `dae_u` | clean | one union DAE (technique unknown; realistic) |
-| `dae_u_matched` | union-DAE outputs of clean+obfuscated mix | union DAE output |
-| `augmentation` | clean+obfuscated mix, **no DAE** | obfuscated |
-| `oracle` | clean | exact analytic inverse (invertible techniques only; equals `clean_ref`) |
-
-The union DAE is trained with clean images in its input mix, so it must pass clean files through unchanged.
-The cost of that is measured (`tech = clean` rows).
-
-### Metrics
-AUROC, AUPRC, TPR at FPR 1e-2 and 1e-3, plus accuracy/sensitivity/specificity at 0.5 for continuity with the paper.
-Mean ± std over seeds, and **paired** per-seed deltas against `identity` and `augmentation` with win counts.
-`TPR@FPR=1e-3` is only meaningful when the benign test set is well above 1,000 files (see `n_test`).
-Reconstruction: MSE, PSNR and SSIM of DAE output against the clean image, split by class, next to the
-do-nothing baseline. A DAE that does not beat the baseline has learned nothing.
+- Six synthetic byte-level transformations (`obfuscate.py`) and the real packer UPX are applied to both classes, so every file has a known clean version. Five of the six are exactly invertible (the exact inverse is the oracle).
+- Conditions per transformation and classifier: `clean_ref`, `identity` (no defence), `augmentation`, `blur_matched`, `dae_t`, `dae_u`, `dae_u_matched`, `oracle`, `clean_subset`.
+- Two CNN classifiers (`cnn1`, `cnn2`), two DAEs (baseline and U-Net), 3 random splits (60/20/20, stratified). DAEs and classifiers are fit on the train split only. All numbers are on the test split.
+- Statistics: paired stratified bootstrap over test files (2,000 resamples), equivalence margin of +-0.02 AUC (also +-0.01 and +-0.03).
 
 ## Run
 
-```bash
-pip install tensorflow numpy pandas pillow scikit-learn matplotlib
+```
+pip install -r requirements.txt
 
-# 1. build the image store (one-off; ~7 stores x N files x 49 KB at 128x128, about 6 GB for 17k files)
-python run_experiment.py build --benign PATH/benign_exe --malware PATH/malicious_exe --work OUT --workers 4
+# 1. image store (about 6 GB for 17,000 files)
+python run_experiment.py build --benign DIR_BENIGN --malware DIR_MALWARE --work OUT
 
-# dress rehearsal first
-python run_experiment.py build --benign ... --malware ... --work OUT_small --max-per-class 500
-python run_experiment.py run   --work OUT_small --seeds 0 --clfs cnn1 --dae-epochs 5 --clf-epochs 5
+# 2. main experiment (resumable)
+python run_experiment.py run --work OUT --seeds 0 1 2 --clfs cnn1 cnn2
 
-# 2. full run (resumable: re-running skips finished seed/classifier blocks)
-python run_experiment.py run --work OUT --seeds 0 1 2 3 4 --clfs cnn1 cnn2
+# 3. analyses added in the revision (results go to OUT/results/)
+python extra.py scores  --work OUT --seeds 0 1 2 --clfs cnn1 cnn2
+python extra.py stats   --work OUT --seeds 0 1 2 --clfs cnn1 cnn2 --boot 2000
+python extra.py matched --work OUT --seeds 0 1 2 --clfs cnn1 cnn2
+python extra.py neardup --work OUT --seeds 0 1 2 --clfs cnn1 cnn2
 
-# 3. ablation: DAE trained on benign+malware clean/obfuscated pairs
-python run_experiment.py run --work OUT --seeds 0 1 2 3 4 --dae-train both
-
-# 4. tables
-python report.py --work OUT        # -> OUT/report/report.md and CSVs, OUT/figures/recon_*.png
+# 4. UPX: how many files UPX accepted, per class
+python upx_counts.py --meta meta.csv --valid valid_UPX.npy --upx-version "upx 4.2.2"
 ```
 
-Extra ablation worth one run: `build --resample area` (the original nearest-neighbour downsizing keeps roughly
-5% of the bytes of a 1 MB file; area averaging keeps all of them but blurs byte structure).
+UPX is used automatically when `upx` is on the PATH (the paper used UPX 4.2.2).
+`dae_study_revision.ipynb` is the Colab notebook that runs these steps.
 
-## Not yet covered (do these before submitting)
+## Result tables (`results/`)
 
-* **Near-duplicates.** Only exact hashes are removed. Cluster with TLSH or imphash and split by cluster.
-* **Real packers.** `UPX` is wired in and activates automatically if `upx` is on PATH, but it has not been
-  exercised against real binaries here. Add MPRESS and a source-level obfuscator for ecological validity.
-* **Packed benign files.** `meta.csv` records per-file entropy and size; use it (or Detect-It-Easy) to report how
-  many "clean" benign files are already packed.
-* **Pretrained classifiers** (VGG16, ResNet50, InceptionV3, MobileNet) are not wired in; `models.build_cnn` is
-  where to add them.
-* **Non-image baseline** (LightGBM on EMBER features) and a **byte-level learned inverse** are still absent.
-* **Data provenance** (item 6 above) and the **antivirus-engine threshold** wording must be fixed in the manuscript.
-* No hyperparameter search; defaults are Adam, 20 epochs, early stopping on validation loss.
+| File | Content | Paper |
+|---|---|---|
+| `paired_bootstrap.csv` | paired AUC differences between defences, 95% interval, equivalence at three margins | Tables 6, 7 |
+| `matched_eval.csv` | AUC inside groups of equal size and of equal size and entropy; metadata-only baselines | Table 13, Table 1 |
+| `neardup.csv` | near-duplicate check of the test images against the train images (cosine similarity of 16x16x3 thumbnails, thresholds 0.90, 0.95, 0.99) | Table 14 |
+| `upx_counts.csv` | files accepted by UPX 4.2.2, by class | Table 10 |
+
+The other tables of the paper are produced by `report.py`.
+
+## Not run
+
+`extra.py` also contains a leave-one-transformation-out test (`loo`), a DAE sensitivity analysis (`sens`) and a fixed-byte-budget image mode (`build --mode fixed`). They were **not** run for the paper, and no result in the paper depends on them. They are listed as limitations.
 
 ## Files
 
-`obfuscate.py` exact obfuscations and inverses | `imaging.py` binary to RGB | `data.py` dedup, split, store |
-`models.py` DAE/CNN, batching, training | `metrics.py` | `run_experiment.py` | `report.py` |
-`tests/make_synthetic.py` toy binaries used for the smoke test.
+`obfuscate.py` transformations and exact inverses | `imaging.py` bytes to RGB | `data.py` dedup, split, image store | `models.py` DAEs, CNNs, training | `metrics.py` | `run_experiment.py` build and run | `extra.py` revision analyses | `upx_counts.py` | `report.py` tables | `metadata_baseline.py`, `export_release.py`, `make_notebook*.py` helpers from the first release.
+
+`NOTES_earlier_evaluation.md` is the previous README, kept for the record.

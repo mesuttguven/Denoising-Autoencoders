@@ -11,7 +11,7 @@ from tensorflow.keras import layers, models
 
 
 # ------------------------------------------------------------ architectures
-def build_dae(size, arch="paper"):
+def build_dae(size, arch="paper", width=1.0, lr=None, loss="mse"):
     """
     arch="paper": the paper's architecture (max-pool bottleneck, no skips).
     arch="unet" : same widths plus skip connections at full resolution, so it
@@ -19,24 +19,28 @@ def build_dae(size, arch="paper"):
                   the DAE: if even this does not help, the conclusion is not an
                   artefact of a weak autoencoder.
     """
-    if arch == "paper":
+    # width, lr and loss are only changed by the sensitivity analysis
+    # (extra.py sens); the defaults reproduce the architectures of the paper.
+    w = lambda f: max(4, int(round(f * width)))
+    if arch == "paper":      # called "baseline DAE" in the manuscript
         m = models.Sequential([
             layers.Input(shape=(size, size, 3)),
-            layers.Conv2D(32, 3, activation="relu", padding="same"),
+            layers.Conv2D(w(32), 3, activation="relu", padding="same"),
             layers.MaxPooling2D(2, padding="same"),
-            layers.Conv2D(64, 3, activation="relu", padding="same"),
+            layers.Conv2D(w(64), 3, activation="relu", padding="same"),
             layers.MaxPooling2D(2, padding="same"),
-            layers.Conv2D(128, 3, activation="relu", padding="same"),
+            layers.Conv2D(w(128), 3, activation="relu", padding="same"),
             layers.UpSampling2D(2),
-            layers.Conv2D(64, 3, activation="relu", padding="same"),
+            layers.Conv2D(w(64), 3, activation="relu", padding="same"),
             layers.UpSampling2D(2),
-            layers.Conv2D(32, 3, activation="relu", padding="same"),
+            layers.Conv2D(w(32), 3, activation="relu", padding="same"),
             layers.Conv2D(3, 3, activation="sigmoid", padding="same"),
         ])
     elif arch == "unet":
         L = layers
         conv = lambda f: L.Conv2D(f, 3, activation="relu", padding="same")
         inp = L.Input(shape=(size, size, 3))
+        conv = lambda f: L.Conv2D(w(f), 3, activation="relu", padding="same")
         c1 = conv(32)(conv(32)(inp))
         c2 = conv(64)(conv(64)(L.MaxPooling2D(2)(c1)))
         b = conv(128)(conv(128)(L.MaxPooling2D(2)(c2)))
@@ -45,7 +49,8 @@ def build_dae(size, arch="paper"):
         m = models.Model(inp, L.Conv2D(3, 1, activation="sigmoid")(d1))
     else:
         raise ValueError(arch)
-    m.compile(optimizer="adam", loss="mse")
+    opt = "adam" if lr is None else tf.keras.optimizers.Adam(lr)
+    m.compile(optimizer=opt, loss=loss)
     return m
 
 
@@ -89,7 +94,7 @@ def build_cnn(kind, size):
 
 # ------------------------------------------------------------------ batching
 def batch_iter(store, idx, sources, batch, rng, target=None, dae=None,
-               shuffle=True):
+               shuffle=True, p_clean=None):
     """
     Yield (x, y).
 
@@ -99,6 +104,10 @@ def batch_iter(store, idx, sources, batch, rng, target=None, dae=None,
               clean and obfuscated versions.
     target  : None -> y = class label;  'clean' -> y = clean image (DAE).
     dae     : optional Keras model applied to x (normalisation step).
+    p_clean : None (default) -> every valid source is equally likely.
+              A number in [0,1] -> the clean image is drawn with that
+              probability and the obfuscated forms share the rest (used only
+              by the training-mixture sensitivity analysis).
     """
     idx = np.asarray(idx)
     if shuffle:
@@ -111,7 +120,14 @@ def batch_iter(store, idx, sources, batch, rng, target=None, dae=None,
             V = np.stack([store.valid[n][b] for n in sources], 1)
             scores = rng.random(V.shape)
             scores[~V] = -1.0
-            src = scores.argmax(1)
+            if p_clean is None:
+                src = scores.argmax(1)
+            else:
+                assert sources[0] == "clean"
+                u = rng.random(len(b))
+                scores[:, 0] = -1.0
+                src = scores.argmax(1)
+                src[(u < p_clean) | (scores.max(1) < 0)] = 0
         x = np.empty((len(b), store.size, store.size, 3), np.float32)
         for k, name in enumerate(sources):
             m = src == k

@@ -264,6 +264,8 @@ def main():
     b.add_argument("--max-per-class", type=int, default=None)
     b.add_argument("--workers", type=int, default=2)
     b.add_argument("--techniques", nargs="*", default=None)
+    b.add_argument("--mode", default="resize", choices=["resize", "fixed"],
+                   help="resize: original construction; fixed: first size*size*3 bytes, no resizing")
     r = sub.add_parser("run")
     r.add_argument("--work", required=True)
     r.add_argument("--seeds", type=int, nargs="+", default=[0])
@@ -278,7 +280,7 @@ def main():
     a = ap.parse_args()
     if a.cmd == "build":
         build_store(a.benign, a.malware, a.work, a.size, a.resample,
-                    a.max_per_class, a.workers, a.techniques)
+                    a.max_per_class, a.workers, a.techniques, a.mode)
     else:
         cmd_run(a)
 

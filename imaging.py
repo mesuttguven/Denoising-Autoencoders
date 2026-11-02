@@ -28,6 +28,19 @@ def bytes_to_rgb(b: bytes, size: int = 128, resample: str = "nearest") -> np.nda
     return np.asarray(img, dtype=np.uint8)
 
 
+def bytes_to_rgb_fixed(b: bytes, size: int = 128) -> np.ndarray:
+    """
+    Fixed byte budget (used for the size-control experiment): the first
+    size*size*3 bytes become the size x size image directly, with no
+    resizing.  Shorter files are padded with zero bytes.  The image side
+    therefore no longer depends on the file length, and no resampling is done.
+    """
+    a = np.frombuffer(b, dtype=np.uint8)[: size * size * 3]
+    canvas = np.zeros(size * size * 3, dtype=np.uint8)
+    canvas[: len(a)] = a
+    return canvas.reshape(size, size, 3)
+
+
 def byte_entropy(b: bytes) -> float:
     if not b:
         return 0.0
