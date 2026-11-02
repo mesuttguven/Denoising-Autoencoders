@@ -1,0 +1,4 @@
+class,files,accepted,rate_percent,median_size_accepted,median_size_refused,median_entropy_accepted,median_entropy_refused
+benign,10000,4993,49.9,166912,26626,6.10,5.42
+malware,7000,4347,62.1,321536,167424,6.64,6.85
+all,17000,9340,54.9,,,,
